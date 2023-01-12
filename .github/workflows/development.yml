@@ -4,7 +4,13 @@ on :
   push:
     branches:
       - main
+  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+
+env:
+  GITOPS_REPO: efraintorlo/gitops-argocd-demo
+  GITOPS_KUSTOMIZE_DIR: argocd-apps/fastapi-demo/development/spec
+
     
 jobs:
   push_to_registry:
@@ -29,3 +35,28 @@ jobs:
         with:
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-demo:${{ steps.image_tag.outputs.tag }}
+  
+      - name: Check out the repo
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          token: ${{ secrets.GITOPS_PAT_TOKEN }}
+          path: gitops
+
+      - name: Update Kustomize Image Tag
+        uses: mikefarah/yq@master
+        with:
+          cmd: cd gitops/${{ env.GITOPS_KUSTOMIZE_DIR }} && yq e '.images[].newTag |= "${{ steps.image_tag.outputs.tag }}"' kustomization.yaml > kustomization_edited.yaml
+      
+      - name: Push Kustomization file into GitOps repo for ArgoCD deployment  
+        uses: dmnemec/copy_file_to_another_repo_action@main
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.GITOPS_PAT_TOKEN }}
+        with:
+          source_file: 'gitops/${{ env.GITOPS_KUSTOMIZE_DIR }}/kustomization_edited.yaml'
+          rename: 'kustomization.yaml'
+          destination_repo: ${{ env.GITOPS_REPO }}
+          destination_folder: ${{ env.GITOPS_KUSTOMIZE_DIR }}
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          user_name: 'github-actions[bot]'
+          commit_message: 'Image tag => ${{steps.image_tag.outputs.tag }} in ${{ env.GITOPS_KUSTOMIZE_DIR }}'
